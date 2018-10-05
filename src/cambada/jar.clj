@@ -92,6 +92,19 @@
        ByteArrayInputStream.
        Manifest.))
 
+
+(defn make-project-properties
+  [{:keys [app-group-id app-artifact-id app-version] :as task}]
+  (with-open [baos (java.io.ByteArrayOutputStream.)]
+    (let [properties (doto (java.util.Properties.)
+                       (.setProperty "version" app-version)
+                       (.setProperty "groupId" app-group-id)
+                       (.setProperty "artifactId" app-artifact-id))]
+      (when-let [revision (utils/read-git-head)]
+        (.setProperty properties "revision" revision))
+      (.store properties baos "Cambada"))
+    (str baos)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Jar proper functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -194,6 +207,12 @@
     (first (filter #(instance? Element %) (first roots)))))
 
 
+(defn- write-pom-properties [{:keys [app-group-id app-artifact-id] :as task} jar-os jar-paths]
+  (let [path (format "META-INF/maven/%s/%s/pom.properties" app-group-id app-artifact-id)
+        props (make-project-properties task)]
+    (copy-to-jar task jar-os jar-paths {:type :bytes :bytes props :path path})))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Main functions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -207,6 +226,7 @@
     (let [jar-paths (reduce (partial copy-to-jar task jar-os)
                             #{}
                             filespecs)]
+      (write-pom-properties task jar-os jar-paths)
       (if main
         (let [main-path (str (-> (string/replace main "." "/")
                                  (string/replace "-" "_"))
@@ -221,8 +241,8 @@
 
 (defn ^:private sync-pom
   [{:keys [deps-map] :as task}]
-  (cli/info "Updating pom.xml") 
-  (gen.pom/sync-pom deps-map (io/file ".")) 
+  (cli/info "Updating pom.xml")
+  (gen.pom/sync-pom deps-map (io/file "."))
   (let [pom-file (io/file "." "pom.xml")
         pom (with-open [rdr (io/reader pom-file)]
               (-> rdr
